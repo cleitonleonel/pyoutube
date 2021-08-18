@@ -233,14 +233,16 @@ if __name__ == '__main__':
         extension = 'mp3'
         content_type = 'audio'
         content_index = 1
-    for index, stream in enumerate(streams[content_index][content_type]):
-        if content_type == 'video':
-            print(f'{index + 1} ==> {stream["resolution"]}')
-        else:
-            print(f'{index + 1} ==> mp3 {stream["quality"]}')
     if len(streams[content_index][content_type]) > 0:
+        for index, stream in enumerate(streams[content_index][content_type]):
+            if content_type == 'video':
+                print(f'{index + 1} ==> {stream["resolution"]}')
+            else:
+                print(f'{index + 1} ==> mp3 {stream["quality"]}')
         try:
-            stream_selected = int(input(f'Digite o número correspondente a {mode} desejada: '))
+            stream_selected = 1
+            if len(streams[content_index][content_type]) > 1:
+                stream_selected = int(input(f'Digite o número correspondente a {mode} desejada: '))
         except:
             sys.exit()
         if stream_selected <= len(streams[content_index][content_type]):
