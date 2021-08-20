@@ -34,7 +34,7 @@ def exec_js(js_data):
 class Browser(object):
 
     def __init__(self):
-        self.sf_response = None
+        self.response = None
         self.headers = self.get_headers()
         self.session = requests.Session()
 
@@ -46,15 +46,16 @@ class Browser(object):
         return self.headers
 
     def send_request(self, method, url, **kwargs):
-        sf_response = self.session.request(method, url, **kwargs)
-        if sf_response.status_code == 200:
-            return sf_response
+        self.response = self.session.request(method, url, **kwargs)
+        if self.response.status_code == 200:
+            return self.response
         return None
 
 
 class SaveFromApi(Browser):
 
     def __init__(self):
+        self.sf_response = None
         super().__init__()
 
     def get_response(self, video_id):
@@ -179,10 +180,11 @@ class YouTubeDownloader(Browser):
         return streaming_list
 
     def downloader(self, url, file_path='', attempts=2):
-        url = requests.utils.unquote(url)
+        url = requests.utils.unquote(url).replace("%2C", ",").replace("%2F", "/").replace("%3D", "=")
         if not file_path:
             file_path = os.path.realpath(os.path.basename(url))
-        print(f'Baixando {requests.utils.unquote(url).replace("%2C", ",").replace("%2F", "/").replace("%3D", "=")} '
+        file_path = file_path.replace('/', '')
+        print(f'Baixando {url} '
               f'conteúdo para {file_path}')
         url_sections = requests.utils.urlparse(url)
         if not url_sections.scheme:
@@ -201,7 +203,7 @@ class YouTubeDownloader(Browser):
                             total=total,
                             unit='iB',
                             unit_scale=True,
-                            unit_divisor=1024,
+                            unit_divisor=1024 * 1024,
                     ) as bar:
                         for chunk in self.response.iter_content(chunk_size=1024 * 1024):
                             size = out_file.write(chunk)
@@ -212,14 +214,60 @@ class YouTubeDownloader(Browser):
                 print(f'Tentativa #{attempt} falhou com erro: {ex}')
         return ''
 
+    def search(self, query_search):
+        encoded_search = requests.utils.quote(query_search)
+        search_data = {
+            'search_query': encoded_search,
+        }
+        self.response = self.send_request('GET', f'{URL_BASE}/results', params=search_data, headers=self.headers)
+        if self.response:
+            return self.parse_js()
+        return False
+
+    def parse_js(self):
+        results = []
+        match = re.compile(r'var ytInitialData = (.*?);</script>').findall(self.response.text)[0]
+        video_results = json.loads(match)
+        primary_contents = video_results["contents"]["twoColumnSearchResultsRenderer"]["primaryContents"]
+        contents = primary_contents["sectionListRenderer"]["contents"][0]["itemSectionRenderer"]["contents"]
+        try:
+            items = contents[0]["shelfRenderer"]["content"]["verticalListRenderer"]["items"]
+        except:
+            items = contents
+        for item in items:
+            try:
+                video_info = item["videoRenderer"]
+                video_info = {
+                    "title": video_info["title"]["runs"][0]["text"],
+                    "link": URL_BASE + video_info["navigationEndpoint"]["commandMetadata"]["webCommandMetadata"]["url"],
+                    "id": video_info["navigationEndpoint"]["commandMetadata"]["webCommandMetadata"]["url"].split('=')[1]
+                }
+                results.append(video_info)
+            except KeyError:
+                pass
+        return results
+
 
 if __name__ == '__main__':
-    yt_id = input('Digite a url do vídeo que deseja baixar: ').split('v=')[1]
     ytd = YouTubeDownloader()
+    yt_id = None
+    list_videos = []
+    yt_action = input('Faça uma busca por vídeos ou digite a url do vídeo que deseja baixar: ')
+    if yt_action.startswith('https://'):
+        yt_id = yt_action.split('v=')[1]
+    else:
+        list_videos = ytd.search(yt_action)
+    if len(list_videos) > 0:
+        for index, stream in enumerate(list_videos):
+            print(f'{index} ==> {stream["title"]}')
+        try:
+            selected_video = int(input(f'Digite o número correspondente ao vídeo: '))
+        except:
+            sys.exit()
+        yt_id = list_videos[selected_video]['id']
     response = ytd.get_response(yt_id)
     data = ytd.get_data()
     streams = ytd.get_streams_data()
-    # print(streams)
     try:
         options = int(input('Digite 1 para baixar vídeos ou 2 para áudios: '))
     except:
