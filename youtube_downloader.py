@@ -19,10 +19,36 @@ from tqdm import tqdm
 
 URL_BASE = 'https://www.youtube.com'
 URL_SAVE_FROM = 'https://worker.sf-tools.com'
+UNITS_MAPPING = [
+    (1 << 50, ' PB'),
+    (1 << 40, ' TB'),
+    (1 << 30, ' GB'),
+    (1 << 20, ' MB'),
+    (1 << 10, ' KB'),
+    (1, (' byte', ' bytes')),
+]
 
 
 def unicode_escape(escaped):
     return escaped.encode().decode('unicode_escape')
+
+
+def pretty_size(value, units=None):
+    global factor, suffix
+    if units is None:
+        units = UNITS_MAPPING
+    for factor, suffix in units:
+        if value >= factor:
+            break
+    amount = int(value / factor)
+
+    if isinstance(suffix, tuple):
+        singular, multiple = suffix
+        if amount == 1:
+            suffix = singular
+        else:
+            suffix = multiple
+    return str(amount) + suffix
 
 
 def exec_js(js_data):
@@ -149,34 +175,40 @@ class YouTubeDownloader(Browser):
                 "audio": [],
             }
         ]
-        for tag in streaming_data['adaptiveFormats']:
-            stream_dict = {}
-            stream_dict['title'] = video_details['title']
-            if not tag.get('signatureCipher'):
-                stream_dict['url'] = tag['url']
-                if tag.get("mimeType").split(';')[0] == 'video/webm':
-                    stream_dict['resolution'] = f'{tag.get("width")}x{tag.get("height")} {tag.get("qualityLabel")}'
-                    stream_dict['quality'] = tag.get('quality')
-                    streaming_list[0]['video'].append(stream_dict)
-                elif tag.get("mimeType").split(';')[0] == 'audio/webm':
-                    stream_dict['quality'] = tag.get('audioQuality')
-                    streaming_list[1]['audio'].append(stream_dict)
-            else:
-                # stream_dict['url'] = re.compile(r'url=(.*?)$').findall(tag['signatureCipher'])[0]
-                sfa = SaveFromApi()
-                get_info_video = sfa.get_response(self.video_id)
-                for url in get_info_video["url"]:
-                    stream_dict = {}
-                    stream_dict['title'] = video_details['title']
-                    if not url.get('no_audio') and url.get('info_token'):
-                        stream_dict['url'] = url["url"]
-                        stream_dict['resolution'] = url["quality"]
-                        stream_dict['quality'] = url["quality"]
+        for value in ['formats', 'adaptiveFormats']:
+            for tag in streaming_data[value]:
+                stream_dict = {}
+                stream_dict['title'] = video_details['title']
+                if not tag.get('signatureCipher'):
+                    stream_dict['url'] = tag['url']
+                    mimetype = tag.get("mimeType").split(';')[0]
+                    if mimetype.split('/')[0] == 'video':
+                        size_file = f'{mimetype.split("/")[1]} ' \
+                                    f'{pretty_size(int(tag.get("contentLength"))) if tag.get("contentLength") else ""}'
+                        stream_dict['resolution'] = f'{tag.get("width")}x{tag.get("height")} ' \
+                                                    f'{tag.get("qualityLabel")} {size_file}'
+                        stream_dict['quality'] = tag.get('quality')
                         streaming_list[0]['video'].append(stream_dict)
-                stream_dict['url'] = get_info_video['converter']['mp4']['720p']['stream'][1]['url']
-                stream_dict['quality'] = get_info_video['converter']['mp4']['720p']['stream'][1]['format']
-                streaming_list[1]['audio'].append(stream_dict)
-                return streaming_list
+                    elif tag.get("mimeType").split(';')[0].split('/')[0] == 'audio':
+                        stream_dict['quality'] = tag.get('audioQuality')
+                        streaming_list[1]['audio'].append(stream_dict)
+                else:
+                    # stream_dict['url'] = re.compile(r'url=(.*?)$').findall(tag['signatureCipher'])[0]
+                    sfa = SaveFromApi()
+                    get_info_video = sfa.get_response(self.video_id)
+                    for url in get_info_video["url"]:
+                        stream_dict = {}
+                        stream_dict['title'] = video_details['title']
+                        if not url.get('no_audio') and url.get('info_token'):
+                            stream_dict['url'] = url["url"]
+                            stream_dict['resolution'] = url["quality"]
+                            stream_dict['quality'] = url["quality"]
+                            streaming_list[0]['video'].append(stream_dict)
+                    if get_info_video.get('converter'):
+                        stream_dict['url'] = get_info_video['converter']['mp4']['720p']['stream'][1]['url']
+                        stream_dict['quality'] = get_info_video['converter']['mp4']['720p']['stream'][1]['format']
+                        streaming_list[1]['audio'].append(stream_dict)
+                    return streaming_list
         return streaming_list
 
     def downloader(self, url, file_path='', attempts=2):
