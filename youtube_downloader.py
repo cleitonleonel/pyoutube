@@ -146,6 +146,7 @@ class YouTubeDownloader(Browser):
         self.response = None
         self.result_data = None
         self.video_id = None
+        self.file_path = None
         super().__init__()
 
     def get_response(self, video_id):
@@ -175,8 +176,17 @@ class YouTubeDownloader(Browser):
                 "audio": [],
             }
         ]
+        # print(json.dumps(streaming_data, indent=4))
+        if streaming_data.get("hlsManifestUrl"):
+            stream_dict = {}
+            stream_dict['title'] = video_details['title']
+            stream_dict['url'] = streaming_data["hlsManifestUrl"]
+            stream_dict['resolution'] = "1080"
+            stream_dict['quality'] = "HD"
+            stream_dict['live'] = True
+            streaming_list[0]['video'].append(stream_dict)
         for value in ['formats', 'adaptiveFormats']:
-            for tag in streaming_data[value]:
+            for tag in streaming_data.get(value) if streaming_data.get(value) else []:
                 stream_dict = {}
                 stream_dict['title'] = video_details['title']
                 if not tag.get('signatureCipher'):
@@ -215,7 +225,7 @@ class YouTubeDownloader(Browser):
         url = requests.utils.unquote(url).replace("%2C", ",").replace("%2F", "/").replace("%3D", "=")
         if not file_path:
             file_path = os.path.realpath(os.path.basename(url))
-        file_path = file_path.replace('/', '')
+        self.file_path = file_path.replace('/', '').replace(' ', '_')
         print(f'Baixando {url} '
               f'conteúdo para {file_path}')
         url_sections = requests.utils.urlparse(url)
@@ -230,8 +240,8 @@ class YouTubeDownloader(Browser):
                 with self.send_request('GET', url, headers=self.headers, stream=True) as self.response:
                     self.response.raise_for_status()
                     total = int(self.response.headers.get('content-length', 0))
-                    with open(file_path, 'wb') as out_file, tqdm(
-                            desc=file_path,
+                    with open(self.file_path, 'wb') as out_file, tqdm(
+                            desc=self.file_path,
                             total=total,
                             unit='iB',
                             unit_scale=True,
@@ -241,7 +251,7 @@ class YouTubeDownloader(Browser):
                             size = out_file.write(chunk)
                             bar.update(size)
                     print('Arquivo baixado com sucesso')
-                    return file_path
+                    return self.file_path
             except Exception as ex:
                 print(f'Tentativa #{attempt} falhou com erro: {ex}')
         return ''
@@ -279,6 +289,9 @@ class YouTubeDownloader(Browser):
                 pass
         return results
 
+    def play(self):
+        os.system(f"cvlc {self.file_path}")
+
 
 if __name__ == '__main__':
     ytd = YouTubeDownloader()
@@ -315,8 +328,9 @@ if __name__ == '__main__':
         content_index = 1
     if len(streams[content_index][content_type]) > 0:
         for index, stream in enumerate(streams[content_index][content_type]):
+            extension = 'm3u8' if stream.get("live") else extension
             if content_type == 'video':
-                print(f'{index + 1} ==> {stream["resolution"]}')
+                print(f'{index + 1} ==> {stream["resolution"]} {"HD Ao Vivo" if stream.get("live") else ""}')
             else:
                 print(f'{index + 1} ==> mp3 {stream["quality"]}')
         try:
@@ -329,6 +343,10 @@ if __name__ == '__main__':
             # print(streams[content_index][content_type][stream_selected - 1])
             url_download = streams[content_index][content_type][stream_selected - 1]['url']
             title_video = f"{streams[content_index][content_type][stream_selected - 1]['title']}.{extension}"
-            ytd.downloader(url_download, file_path=title_video)
+            download = ytd.downloader(url_download, file_path=title_video)
+            if download:
+                ytd.play()
     else:
         print('Nenhum item encontrado para a opção desejada.')
+
+    exit(0)
